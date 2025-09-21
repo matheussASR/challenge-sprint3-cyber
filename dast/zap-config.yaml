@@ -1,0 +1,38 @@
+env:
+  # URL alvo (variável vinda do pipeline)
+  target: ${ZAP_TARGET}
+  context:
+    name: StagingContext
+    urls:
+      - ${ZAP_TARGET}
+    includePaths:
+      - ${ZAP_TARGET}.*
+    excludePaths:
+      - ${ZAP_TARGET}/logout
+
+jobs:
+  - name: passive scan
+    type: passiveScan-config
+    parameters:
+      maxAlertsPerRule: 10
+      maxRuleDurationInMins: 5
+
+  - name: spider
+    type: spider
+    parameters:
+      url: ${ZAP_TARGET}
+      maxDuration: 10
+      maxDepth: 5
+      recurse: true
+      context: StagingContext
+
+  - name: active scan
+    type: activeScan
+    parameters:
+      url: ${ZAP_TARGET}
+      policy: Default Policy
+      maxRuleDurationInMins: 5
+      context: StagingContext
+      recurse: true
+      attackStrength: HIGH
+      alertThreshold: MEDIUM

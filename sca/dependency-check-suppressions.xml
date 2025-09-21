@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+  <!-- Suprimir CVE específico (justifique no comentário) -->
+  <suppress>
+    <notes>Biblioteca usada só em dev; não atinge runtime.</notes>
+    <cve>CVE-2020-12345</cve>
+    <packageUrl regex="true">^pkg:npm/algum-pacote@.*$</packageUrl>
+    <until>2025-12-31</until>
+  </suppress>
+</suppressions>
