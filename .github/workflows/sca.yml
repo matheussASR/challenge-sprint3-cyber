@@ -10,29 +10,35 @@ on:
 
 permissions:
   contents: read
-  security-events: write   # necessário para enviar SARIF
+  security-events: write
 
 jobs:
   dependency-check:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Cache do banco NVD para acelerar execuções futuras
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: npm ci (populate node_modules)
+        run: |
+          if [ -f package-lock.json ] || [ -f package.json ]; then
+            npm ci || npm i
+          fi
+
       - name: Cache DC Data
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/org/owasp/dependency-check-data
           key: dc-data-${{ runner.os }}-v8
 
-      - name: Run OWASP Dependency-Check
+      - name: Run OWASP Dependency-Check (OSS Index disabled)
         uses: dependency-check/Dependency-Check_Action@main
         with:
           project: "${{ github.repository }}"
-          path: "."                     # ajuste se quiser escanear subpastas específicas
-          format: "ALL"                 # <-- CORRIGIDO (gera HTML, JSON, SARIF, etc.)
+          path: "."
+          format: "ALL"
           out: "dc-reports"
           args: >
             --failOnCVSS 7.0
@@ -41,6 +47,7 @@ jobs:
             --disableArchive
             --scan ./
             --suppression sca/dependency-check-suppressions.xml
+            --disableOssIndex
 
       - name: Upload SARIF to Code Scanning
         uses: github/codeql-action/upload-sarif@v3
