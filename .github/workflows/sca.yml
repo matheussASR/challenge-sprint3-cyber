@@ -16,9 +16,12 @@ jobs:
   dependency-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      # Instala dependências Node para que o DC consiga mapear o package-lock para CPEs
+      - name: Setup Node and install deps
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
       - name: npm ci (populate node_modules)
@@ -33,11 +36,11 @@ jobs:
           path: ~/.m2/repository/org/owasp/dependency-check-data
           key: dc-data-${{ runner.os }}-v8
 
-      - name: Run OWASP Dependency-Check (OSS Index disabled)
+      - name: Run OWASP Dependency-Check
         uses: dependency-check/Dependency-Check_Action@main
         with:
           project: "${{ github.repository }}"
-          path: "."
+          path: "."                       # raiz
           format: "ALL"
           out: "dc-reports"
           args: >
@@ -47,7 +50,8 @@ jobs:
             --disableArchive
             --scan ./
             --suppression sca/dependency-check-suppressions.xml
-            --disableOssIndex
+            --ossIndexUsername ${{ secrets.OSSINDEX_USER }}
+            --ossIndexPassword ${{ secrets.OSSINDEX_TOKEN }}
 
       - name: Upload SARIF to Code Scanning
         uses: github/codeql-action/upload-sarif@v3
