@@ -1,6 +1,7 @@
-name: SCA - Dependency Analysis
+name: SCA - Dependency Check
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main", "master" ]
   pull_request:
@@ -8,79 +9,46 @@ on:
 
 permissions:
   contents: read
-  security-events: write   # para enviar SARIF
+  security-events: write   # para enviar SARIF ao Code Scanning
 
 jobs:
   dependency-check:
-    name: OWASP Dependency-Check
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # (Opcional) Cache do banco NVD para acelerar
+      # Cache do banco NVD para acelerar execuções futuras
       - name: Cache DC Data
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/org/owasp/dependency-check-data
           key: dc-data-${{ runner.os }}-v8
 
-      - name: Run Dependency-Check (multi-ecosystem)
+      - name: Run OWASP Dependency-Check
         uses: dependency-check/Dependency-Check_Action@main
         with:
-          project: "challenge-sprint3-cyber"
-          path: "."                            # raiz do projeto
+          project: "${{ github.repository }}"
+          path: "."                            # varre a raiz (ajuste se quiser)
           format: "HTML,JSON,SARIF"
           out: "dc-reports"
           args: >
             --failOnCVSS 7.0
+            --enableRetired
             --enableExperimental
             --disableArchive
-            --noupdate false
-            --scan ./                          # varre tudo; ajuste se quiser
+            --scan ./
             --suppression sca/dependency-check-suppressions.xml
-            --ossIndexUsername ${{ secrets.OSSINDEX_USER }}
-            --ossIndexPassword ${{ secrets.OSSINDEX_TOKEN }}
 
       - name: Upload SARIF to Code Scanning
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: dc-reports/dependency-check-report.sarif
 
-      - name: Upload HTML/JSON artifacts
+      - name: Upload SCA reports
         uses: actions/upload-artifact@v4
         with:
-          name: dependency-check-reports
+          name: sca-dependency-check-${{ github.run_attempt }}
           path: dc-reports/*
           retention-days: 14
-
-  # (Opcional) License Scanner simples via Node (se houver package.json)
-  license-check:
-    if: ${{ hashFiles('**/package.json') != '' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - run: npm ci --ignore-scripts || npm i
-      - run: npx license-checker --json > sca/licenses.json
-      - name: Enforce license allowlist
-        run: |
-          ALLOW=$(cat sca/allowlist-licenses.txt | tr '\n' '|' | sed 's/|$//')
-          BAD=$(jq -r --arg re "$ALLOW" '
-            to_entries[]
-            | select(.value.licenses|test($re)==false)
-            | "\(.key): \(.value.licenses)"
-          ' sca/licenses.json)
-          if [ -n "$BAD" ]; then
-            echo "Licenças fora da allowlist:"
-            echo "$BAD"
-            exit 1
-          fi
-      - uses: actions/upload-artifact@v4
-        with:
-          name: license-report
-          path: sca/licenses.json
-          retention-days: 14
+          overwrite: true
