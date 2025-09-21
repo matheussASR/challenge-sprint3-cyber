@@ -18,7 +18,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Instala dependências Node (preenche node_modules p/ melhor detecção)
       - name: Setup Node and install deps
         uses: actions/setup-node@v4
         with:
@@ -48,7 +47,6 @@ jobs:
             --enableExperimental
             --disableArchive
             --scan ./
-            --suppression sca/dependency-check-suppressions.xml
             ${{ (secrets.OSSINDEX_USER != '' && secrets.OSSINDEX_TOKEN != '')
                 && format('--ossIndexUsername {0} --ossIndexPassword {1}', secrets.OSSINDEX_USER, secrets.OSSINDEX_TOKEN)
                 || '--disableOssIndex' }}
