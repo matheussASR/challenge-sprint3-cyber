@@ -1,0 +1,12 @@
+repos:
+  - repo: https://github.com/returntocorp/semgrep
+    rev: v1.82.0
+    hooks:
+      - id: semgrep
+        args: [
+          "--config", "./semgrep/rules",      # suas regras customizadas
+          "--config", "p/owasp-top-ten",      # pacotes oficiais
+          "--config", "p/security-audit",
+          "--config", "p/secrets",
+          "--error"
+        ]

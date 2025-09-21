@@ -1,0 +1,8 @@
+rules:
+  - id: js-sql-concat
+    patterns:
+      - pattern: |
+          $DB.query($SQL + $USERINPUT)
+    message: "Possível SQL Injection: use parâmetros/bind variables."
+    severity: HIGH
+    languages: [javascript, typescript]

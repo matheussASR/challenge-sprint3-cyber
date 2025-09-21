@@ -1,0 +1,18 @@
+# semgrep.yml
+# Regras de segurança robustas + OWASP Top 10
+# Ajuste linguagens conforme seu stack (python, java, ts, js, go, etc.)
+# Docs: https://semgrep.dev/r
+
+# Importa pacotes mantidos pela comunidade/Semgrep
+# p/owasp-top-ten cobre injeções, XSS, auth, exposição de segredos etc.
+# p/ci inclui boas regras para pipelines
+# p/secrets detecta chaves/senhas hardcoded
+# p/docker e p/github-actions são úteis se você tem infra como código
+rules:
+  - pattern-either: []  # placeholder para permitir anchors abaixo
+
+# Usando "configs" (atalhos prontos)
+# Você pode usar "semgrep --config" direto; manter aqui ajuda a documentar.
+# Lista de configs recomendadas:
+#   p/owasp-top-ten, p/security-audit, p/secrets, p/r2c-ci, p/r2c-best-practices
+# Para maior controle, prefira o formato CLI (ver pipeline).
