@@ -1,3 +1,4 @@
+# .github/workflows/sca.yml
 name: SCA - Dependency Check
 
 on:
@@ -9,11 +10,12 @@ on:
 
 permissions:
   contents: read
-  security-events: write   # para enviar SARIF ao Code Scanning
+  security-events: write   # necessário para enviar SARIF
 
 jobs:
   dependency-check:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,8 +31,8 @@ jobs:
         uses: dependency-check/Dependency-Check_Action@main
         with:
           project: "${{ github.repository }}"
-          path: "."                            # varre a raiz (ajuste se quiser)
-          format: "HTML,JSON,SARIF"
+          path: "."                     # ajuste se quiser escanear subpastas específicas
+          format: "ALL"                 # <-- CORRIGIDO (gera HTML, JSON, SARIF, etc.)
           out: "dc-reports"
           args: >
             --failOnCVSS 7.0
