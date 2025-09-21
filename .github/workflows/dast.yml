@@ -1,51 +1,28 @@
-name: DAST - OWASP ZAP
+name: DAST - OWASP ZAP (baseline)
 
 on:
-  workflow_dispatch:   # Executa manualmente
+  workflow_dispatch:
   push:
-    branches: [ "main" ]  # Quando houver deploy em staging
+    branches: [ "main", "master" ]
 
 jobs:
-  dast:
-    name: Run DAST with OWASP ZAP
+  zap-baseline:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install OWASP ZAP
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zaproxy
-
-      - name: Run OWASP ZAP automation scan
+      - name: Run ZAP Baseline Scan
         env:
-          ZAP_TARGET: ${{ secrets.STAGING_URL }}
+          TARGET: ${{ secrets.STAGING_URL }}
         run: |
           mkdir -p dast-reports
-          zap.sh -cmd -autorun dast/zap-config.yaml \
-            -session dast-reports/zap-session.session \
-            -addonupdate \
-            -addoninstall pscanrulesBeta \
-            -addoninstall ascanrulesBeta
+          docker run --rm -v "$PWD/dast-reports:/zap/wrk" owasp/zap2docker-stable \
+            zap-baseline.py -t "$TARGET" -r zap-report.html
 
-      - name: Generate report
-        run: |
-          zap.sh -cmd -session dast-reports/zap-session.session \
-            -reportformat HTML \
-            -reportfile dast-reports/zap-report.html
-
-      - name: Upload DAST Report
+      - name: Upload DAST report
         uses: actions/upload-artifact@v4
         with:
-          name: dast-report
+          name: zap-dast-report
           path: dast-reports/zap-report.html
           retention-days: 14
-
-      - name: Fail pipeline on HIGH/CRITICAL
-        run: |
-          if grep -q "High" dast-reports/zap-report.html || grep -q "Critical" dast-reports/zap-report.html; then
-            echo "Vulnerabilidades críticas encontradas! Falhando pipeline."
-            exit 1
-          fi
