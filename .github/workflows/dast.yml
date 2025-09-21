@@ -1,5 +1,4 @@
-name: DAST - OWASP ZAP (baseline)
-
+name: DAST - ZAP Baseline
 on:
   workflow_dispatch:
   push:
@@ -9,20 +8,21 @@ jobs:
   zap-baseline:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Run ZAP Baseline Scan
-        env:
-          TARGET: ${{ secrets.STAGING_URL }}
-        run: |
-          mkdir -p dast-reports
-          docker run --rm -v "$PWD/dast-reports:/zap/wrk" owasp/zap2docker-stable \
-            zap-baseline.py -t "$TARGET" -r zap-report.html
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.10.0
+        with:
+          target: ${{ secrets.STAGING_URL }}   # defina em Settings > Secrets > Actions
+          rules_file_name: ''
+          cmd_options: '-a'                    # agressivo passivo
+          allow_issue_writing: false
 
-      - name: Upload DAST report
+      - name: Upload ZAP report
         uses: actions/upload-artifact@v4
         with:
           name: zap-dast-report
-          path: dast-reports/zap-report.html
+          path: |
+            report_html.html
+            zap.out
           retention-days: 14
