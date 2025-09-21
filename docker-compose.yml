@@ -5,8 +5,10 @@ services:
     command: sh -c "npm ci || npm i && node src/index.js"
     volumes:
       - ./:/app
-    ports:
-      - "3000:3000"   # opcional (exposição externa não é necessária pro ZAP)
+    # ports é opcional para o ZAP (ele acessa via rede interna)
+    # ports:
+    #   - "3000:3000"
 networks:
   default:
     name: zapnet
+    external: true
