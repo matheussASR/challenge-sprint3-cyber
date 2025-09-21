@@ -1,0 +1,12 @@
+services:
+  app:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci || npm i && node src/index.js"
+    volumes:
+      - ./:/app
+    ports:
+      - "3000:3000"   # opcional (exposição externa não é necessária pro ZAP)
+networks:
+  default:
+    name: zapnet
