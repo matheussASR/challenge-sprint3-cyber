@@ -1,4 +1,5 @@
-name: DAST - ZAP (containers)
+# .github/workflows/dast.yml
+name: DAST - ZAP Baseline (localhost)
 
 on:
   workflow_dispatch:
@@ -6,36 +7,31 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  zap:
+  zap-baseline:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # cria a rede externa uma vez (não falha se já existir)
-      - name: Create external network
-        run: docker network create zapnet || true
-
-      - name: Start app on zapnet
+      - name: Start app with Compose
         run: |
           docker compose up -d
-          # aguarda a app responder dentro da rede
+          # aguarda a app responder em localhost:3000
           for i in {1..30}; do
-            if docker run --rm --network zapnet curlimages/curl:8.9.1 -fsS http://app:3000/ >/dev/null; then
+            if curl -fsS http://127.0.0.1:3000/ >/dev/null; then
               echo "APP UP"; break; fi
             sleep 2
           done
 
-      - name: ZAP Baseline (same network)
+      - name: ZAP Baseline Scan (localhost)
         uses: zaproxy/action-baseline@v0.14.0
         with:
           docker_name: 'ghcr.io/zaproxy/zaproxy:stable'
-          docker_network: 'zapnet'
-          target: 'http://app:3000'
+          target: 'http://127.0.0.1:3000'   # <— use localhost, não "app"
           cmd_options: '-a'
           allow_issue_writing: false
           artifact_name: 'zap-dast-report'
 
-      - name: Upload report
+      - name: Upload ZAP report
         uses: actions/upload-artifact@v4
         with:
           name: zap-dast-report

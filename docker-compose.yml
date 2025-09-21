@@ -1,3 +1,4 @@
+# docker-compose.yml
 services:
   app:
     image: node:20-alpine
@@ -5,10 +6,5 @@ services:
     command: sh -c "npm ci || npm i && node src/index.js"
     volumes:
       - ./:/app
-    # ports é opcional para o ZAP (ele acessa via rede interna)
-    # ports:
-    #   - "3000:3000"
-networks:
-  default:
-    name: zapnet
-    external: true
+    ports:
+      - "3000:3000"   # <— IMPORTANTE: publicar a porta
