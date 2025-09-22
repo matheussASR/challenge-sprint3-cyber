@@ -14,7 +14,6 @@ permissions:
 env:
   NODE_VERSION: "20"
   FAIL_ON_CVSS: "7.0"      # SCA: falha se CVSS >= 7.0
-  FAIL_ON_SEVERITY: "HIGH" # SAST/DAST: falha se High/Critical
 
 jobs:
   # ======================= SAST =======================
@@ -32,7 +31,6 @@ jobs:
       - name: Run Semgrep (JSON + SARIF)
         run: |
           mkdir -p reports
-          # use suas regras + pacotes oficiais
           semgrep ci --json --json-output=reports/semgrep.json || true
           semgrep ci --sarif --sarif-output=reports/semgrep.sarif || true
 
@@ -42,19 +40,21 @@ jobs:
           sarif_file: reports/semgrep.sarif
 
       - name: Gate SAST (fail on HIGH/CRITICAL)
+        shell: bash
         run: |
-          python - << 'PY'
-import json,sys
-try:
-  data=json.load(open("reports/semgrep.json"))
-  results=data.get("results",[])
-  bad=[r for r in results if (r.get("extra",{}).get("severity","").upper() in ("HIGH","CRITICAL"))]
-  print(f"Semgrep: total={len(results)} high/critical={len(bad)}")
-  sys.exit(1 if bad else 0)
-except FileNotFoundError:
-  print("Semgrep: sem arquivo de resultados; seguindo.")
-  sys.exit(0)
-PY
+          python - <<'PY'
+          import json, sys
+          try:
+              with open("reports/semgrep.json", "r", encoding="utf-8") as f:
+                  data = json.load(f)
+              results = data.get("results", [])
+              bad = [r for r in results if (r.get("extra", {}).get("severity", "").upper() in ("HIGH", "CRITICAL"))]
+              print(f"Semgrep: total={len(results)} high/critical={len(bad)}")
+              sys.exit(1 if bad else 0)
+          except FileNotFoundError:
+              print("Semgrep: sem arquivo de resultados; seguindo.")
+              sys.exit(0)
+          PY
 
       - uses: actions/upload-artifact@v4
         with:
@@ -71,7 +71,8 @@ PY
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
-        with: { node-version: ${{ env.NODE_VERSION }} }
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: npm ci (popular node_modules p/ melhor detecção)
         run: |
@@ -148,11 +149,12 @@ PY
         with:
           docker_name: 'ghcr.io/zaproxy/zaproxy:stable'
           target: 'http://127.0.0.1:3000'
-          cmd_options: '-a'                # crawl passivo agressivo
+          cmd_options: '-a'
           allow_issue_writing: false
-          artifact_name: 'zap-dast-report' # já sobe report_html.html + zap.out
+          artifact_name: 'zap-dast-report'
 
       - name: Gate DAST (fail on HIGH/CRITICAL)
+        shell: bash
         run: |
           if grep -qiE "High|Critical" report_html.html; then
             echo "ZAP encontrou High/Critical. Falhando job."
@@ -183,23 +185,21 @@ PY
           REPO:   ${{ github.repository }}
         run: |
           STATUS="SAST: ${S_SAST} | SCA: ${S_SCA} | DAST: ${S_DAST}"
-          COLOR="#36a64f"; if [ "$S_SAST" != "success" ] || [ "$S_SCA" != "success" ] || [ "$S_DAST" != "success" ]; then COLOR="#e01e5a"; fi
-          curl -X POST -H 'Content-type: application/json' --data "$(cat <<JSON
+          COLOR="#36a64f"
+          if [ "$S_SAST" != "success" ] || [ "$S_SCA" != "success" ] || [ "$S_DAST" != "success" ]; then
+            COLOR="#e01e5a"
+          fi
+          jq -n --arg color "$COLOR" --arg status "$STATUS" --arg repo "$REPO" --arg branch "$BRANCH" --arg url "$RUN_URL" '
           {
-            "attachments": [{
-              "color": "$COLOR",
-              "title": "CI/CD Security Pipeline",
-              "text": "$STATUS",
-              "fields": [
-                {"title": "Repo", "value": "$REPO", "short": true},
-                {"title": "Branch", "value": "$BRANCH", "short": true}
+            attachments: [{
+              color: $color,
+              title: "CI/CD Security Pipeline",
+              text: $status,
+              fields: [
+                {title:"Repo", value:$repo, short:true},
+                {title:"Branch", value:$branch, short:true}
               ],
-              "actions": [{
-                "type": "button",
-                "text": "Ver execução",
-                "url": "$RUN_URL"
-              }]
+              actions: [{type:"button", text:"Ver execução", url:$url}]
             }]
-          }
-JSON
-)" "$HOOK"
+          }' > slack.json
+          curl -X POST -H 'Content-type: application/json' --data @slack.json "$HOOK"
