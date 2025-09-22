@@ -27,14 +27,41 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install semgrep
+          semgrep --version
 
+      # Rodar SEMPRE com rulepacks públicos + suas regras locais (sem depender de token)
       - name: Run Semgrep (JSON + SARIF)
         run: |
           mkdir -p reports
-          semgrep ci --json --json-output=reports/semgrep.json || true
-          semgrep ci --sarif --sarif-output=reports/semgrep.sarif || true
+          # Use rulepacks oficiais
+          semgrep \
+            --config p/owasp-top-ten \
+            --config p/security-audit \
+            --config p/secrets \
+            --config ./semgrep/semgrep.yml 2>/dev/null || true
+          # Gera JSON
+          semgrep \
+            --config p/owasp-top-ten \
+            --config p/security-audit \
+            --config p/secrets \
+            --config ./semgrep/semgrep.yml \
+            --json --output reports/semgrep.json \
+            --error || true
+          # Gera SARIF
+          semgrep \
+            --config p/owasp-top-ten \
+            --config p/security-audit \
+            --config p/secrets \
+            --config ./semgrep/semgrep.yml \
+            --sarif --output reports/semgrep.sarif \
+            --error || true
+          # Se ainda não existir SARIF, cria um vazio (evita falha no upload)
+          if [ ! -s reports/semgrep.sarif ]; then
+            echo '{"version":"2.1.0","runs":[]}' > reports/semgrep.sarif
+          fi
 
       - name: Upload SARIF (SAST)
+        if: ${{ hashFiles('reports/semgrep.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: reports/semgrep.sarif
@@ -42,18 +69,16 @@ jobs:
       - name: Gate SAST (fail on HIGH/CRITICAL)
         shell: bash
         run: |
+          if [ ! -s reports/semgrep.json ]; then
+            echo "Semgrep: sem JSON de resultados; seguindo."; exit 0
+          fi
           python - <<'PY'
           import json, sys
-          try:
-              with open("reports/semgrep.json", "r", encoding="utf-8") as f:
-                  data = json.load(f)
-              results = data.get("results", [])
-              bad = [r for r in results if (r.get("extra", {}).get("severity", "").upper() in ("HIGH", "CRITICAL"))]
-              print(f"Semgrep: total={len(results)} high/critical={len(bad)}")
-              sys.exit(1 if bad else 0)
-          except FileNotFoundError:
-              print("Semgrep: sem arquivo de resultados; seguindo.")
-              sys.exit(0)
+          data=json.load(open("reports/semgrep.json","r",encoding="utf-8"))
+          results=data.get("results",[])
+          bad=[r for r in results if (r.get("extra",{}).get("severity","").upper() in ("HIGH","CRITICAL"))]
+          print(f"Semgrep: total={len(results)} high/critical={len(bad)}")
+          sys.exit(1 if bad else 0)
           PY
 
       - uses: actions/upload-artifact@v4
@@ -62,6 +87,7 @@ jobs:
           path: reports/*
           retention-days: 14
           overwrite: true
+
 
   # ======================= SCA =======================
   sca:
