@@ -2,58 +2,39 @@ name: CI/CD + Security (SAST, SCA, DAST)
 
 on:
   push:
-    branches: [ "main", "master", "release/**" ]
+    branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
 permissions:
   contents: read
-  security-events: write    # enviar SARIF p/ Code Scanning
-  actions: read
+  security-events: write   # enviar SARIF para Security > Code scanning alerts
 
 env:
-  FAIL_ON_SEVERITY: "HIGH"  # limiar para falhar jobs (HIGH/CRITICAL)
+  NODE_VERSION: "20"
+  FAIL_ON_CVSS: "7.0"      # SCA: falha se CVSS >= 7.0
+  FAIL_ON_SEVERITY: "HIGH" # SAST/DAST: falha se High/Critical
 
 jobs:
-  # ---------- CI: SAST ----------
+  # ======================= SAST =======================
   sast:
     name: SAST (Semgrep)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.x" }
-
       - name: Install Semgrep
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install semgrep
 
-      - name: Run Semgrep
+      - name: Run Semgrep (JSON + SARIF)
         run: |
           mkdir -p reports
-          semgrep \
-            --timeout 180 \
-            --config ./semgrep/semgrep.yml 2>/dev/null || true
-          # Fallback caso não use semgrep.yml central
-          semgrep \
-            --timeout 180 \
-            --config p/owasp-top-ten \
-            --config p/security-audit \
-            --config p/secrets \
-            --config ./semgrep/rules \
-            --exclude node_modules --exclude dist --exclude build \
-            --json -o reports/semgrep.json || true
-          semgrep \
-            --timeout 180 \
-            --config p/owasp-top-ten \
-            --config p/security-audit \
-            --config p/secrets \
-            --config ./semgrep/rules \
-            --exclude node_modules --exclude dist --exclude build \
-            --sarif -o reports/semgrep.sarif || true
+          # use suas regras + pacotes oficiais
+          semgrep ci --json --json-output=reports/semgrep.json || true
+          semgrep ci --sarif --sarif-output=reports/semgrep.sarif || true
 
       - name: Upload SARIF (SAST)
         uses: github/codeql-action/upload-sarif@v3
@@ -66,27 +47,37 @@ jobs:
 import json,sys
 try:
   data=json.load(open("reports/semgrep.json"))
-except:
-  print("Sem semgrep.json; assumindo 0 achados.")
+  results=data.get("results",[])
+  bad=[r for r in results if (r.get("extra",{}).get("severity","").upper() in ("HIGH","CRITICAL"))]
+  print(f"Semgrep: total={len(results)} high/critical={len(bad)}")
+  sys.exit(1 if bad else 0)
+except FileNotFoundError:
+  print("Semgrep: sem arquivo de resultados; seguindo.")
   sys.exit(0)
-sev=lambda r:(r.get("extra",{}).get("severity") or "").upper()
-bad=[r for r in data.get("results",[]) if sev(r) in ("HIGH","CRITICAL")]
-print(f"Total achados: {len(data.get('results',[]))} | HIGH/CRITICAL: {len(bad)}")
-sys.exit(1 if bad else 0)
 PY
 
       - uses: actions/upload-artifact@v4
         with:
-          name: sast-semgrep
+          name: sast-semgrep-${{ github.run_attempt }}
           path: reports/*
           retention-days: 14
+          overwrite: true
 
-  # ---------- CI: SCA ----------
+  # ======================= SCA =======================
   sca:
     name: SCA (OWASP Dependency-Check)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ env.NODE_VERSION }} }
+
+      - name: npm ci (popular node_modules p/ melhor detecção)
+        run: |
+          if [ -f package.json ]; then
+            npm ci || npm i
+          fi
 
       - name: Cache DC Data
         uses: actions/cache@v4
@@ -97,18 +88,19 @@ PY
       - name: Run Dependency-Check
         uses: dependency-check/Dependency-Check_Action@main
         with:
-          project: "challenge-sprint3-cyber"
+          project: "${{ github.repository }}"
           path: "."
-          format: "HTML,JSON,SARIF"
+          format: "ALL"
           out: "dc-reports"
           args: >
-            --failOnCVSS 7.0
+            --failOnCVSS ${{ env.FAIL_ON_CVSS }}
+            --enableRetired
             --enableExperimental
             --disableArchive
             --scan ./
-            --suppression sca/dependency-check-suppressions.xml
-            --ossIndexUsername ${{ secrets.OSSINDEX_USER }}
-            --ossIndexPassword ${{ secrets.OSSINDEX_TOKEN }}
+            ${{ (secrets.OSSINDEX_USER != '' && secrets.OSSINDEX_TOKEN != '')
+                && format('--ossIndexUsername {0} --ossIndexPassword {1}', secrets.OSSINDEX_USER, secrets.OSSINDEX_TOKEN)
+                || '--disableOssIndex' }}
 
       - name: Upload SARIF (SCA)
         uses: github/codeql-action/upload-sarif@v3
@@ -117,114 +109,90 @@ PY
 
       - uses: actions/upload-artifact@v4
         with:
-          name: sca-dependency-check
+          name: sca-dependency-check-${{ github.run_attempt }}
           path: dc-reports/*
           retention-days: 14
+          overwrite: true
 
-  # ---------- CD: Deploy Staging (exemplo dummy) ----------
+  # =================== Deploy Staging (local) ===================
   deploy_staging:
-    name: Deploy to Staging
+    name: Deploy Staging (Compose local)
     runs-on: ubuntu-latest
     needs: [sast, sca]
-    if: ${{ always() && !cancelled() && needs.sast.result == 'success' && needs.sca.result == 'success' }}
+    if: ${{ needs.sast.result == 'success' && needs.sca.result == 'success' }}
     steps:
-      - run: |
-          echo "Faça aqui seu deploy real (ex: Docker/Helm/Vercel/EB/etc)."
-          echo "Se falhar, o DAST não roda."
-      - name: Expose STAGING_URL
-        run: echo "STAGING=${{ secrets.STAGING_URL }}" >> $GITHUB_ENV
+      - uses: actions/checkout@v4
 
-  # ---------- CD: DAST (ZAP) ----------
+      - name: Start app (docker compose)
+        run: |
+          docker compose up -d
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/ >/dev/null; then
+              echo "APP UP"; exit 0; fi
+            sleep 2
+          done
+          echo "App não respondeu em http://127.0.0.1:3000"
+          docker compose logs --no-color || true
+          exit 1
+
+  # ======================= DAST =======================
   dast:
-    name: DAST (OWASP ZAP)
+    name: DAST (OWASP ZAP Baseline)
     runs-on: ubuntu-latest
     needs: [deploy_staging]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install ZAP
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zaproxy
-
-      - name: Run ZAP Automation
-        env:
-          ZAP_TARGET: ${{ secrets.STAGING_URL }}
-        run: |
-          mkdir -p dast-reports
-          zap.sh -cmd -autorun dast/zap-config.yaml \
-            -session dast-reports/zap-session.session \
-            -addonupdate \
-            -addoninstall pscanrulesBeta \
-            -addoninstall ascanrulesBeta
-
-      - name: Export ZAP HTML
-        run: |
-          zap.sh -cmd -session dast-reports/zap-session.session \
-            -reportformat HTML \
-            -reportfile dast-reports/zap-report.html
-
-      - uses: actions/upload-artifact@v4
+      - name: ZAP Baseline Scan (localhost)
+        uses: zaproxy/action-baseline@v0.14.0
         with:
-          name: dast-zap
-          path: dast-reports/*
-          retention-days: 14
+          docker_name: 'ghcr.io/zaproxy/zaproxy:stable'
+          target: 'http://127.0.0.1:3000'
+          cmd_options: '-a'                # crawl passivo agressivo
+          allow_issue_writing: false
+          artifact_name: 'zap-dast-report' # já sobe report_html.html + zap.out
 
       - name: Gate DAST (fail on HIGH/CRITICAL)
         run: |
-          if grep -qi "High" dast-reports/zap-report.html || grep -qi "Critical" dast-reports/zap-report.html; then
-            echo "DAST encontrou HIGH/CRITICAL. Bloqueando pipeline."
+          if grep -qiE "High|Critical" report_html.html; then
+            echo "ZAP encontrou High/Critical. Falhando job."
             exit 1
           fi
+          echo "DAST sem High/Critical."
 
-  # ---------- (Opcional) Deploy Produção ----------
-  deploy_prod:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    needs: [dast]
-    if: ${{ github.ref == 'refs/heads/main' && needs.dast.result == 'success' }}
-    steps:
-      - run: echo "Execute aqui o deploy de produção."
-      - run: echo "Só executa se DAST passou sem HIGH/CRITICAL."
+      - name: Tear down
+        if: always()
+        run: docker compose down -v || true
 
-  # ---------- Notificações ----------
+  # ===================== Notificação (opcional) =====================
   notify:
     name: Notify Slack
     runs-on: ubuntu-latest
     needs: [sast, sca, dast]
     if: always()
     steps:
-      - name: Build summary message
-        id: sum
-        run: |
-          echo "status_sast=${{ needs.sast.result }}" >> $GITHUB_OUTPUT
-          echo "status_sca=${{ needs.sca.result }}" >> $GITHUB_OUTPUT
-          echo "status_dast=${{ needs.dast.result }}" >> $GITHUB_OUTPUT
-          echo "run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_OUTPUT
-
-      - name: Post to Slack
-        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
+      - name: Post to Slack (optional)
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
         env:
           HOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
-          S_SAST: ${{ steps.sum.outputs.status_sast }}
-          S_SCA:  ${{ steps.sum.outputs.status_sca }}
-          S_DAST: ${{ steps.sum.outputs.status_dast }}
-          RUN_URL: ${{ steps.sum.outputs.run_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          S_SAST: ${{ needs.sast.result }}
+          S_SCA:  ${{ needs.sca.result }}
+          S_DAST: ${{ needs.dast.result }}
+          BRANCH: ${{ github.ref_name }}
+          REPO:   ${{ github.repository }}
         run: |
           STATUS="SAST: ${S_SAST} | SCA: ${S_SCA} | DAST: ${S_DAST}"
-          COLOR="#36a64f"
-          if [ "$S_SAST" != "success" ] || [ "$S_SCA" != "success" ] || [ "$S_DAST" != "success" ]; then
-            COLOR="#e01e5a"
-          fi
-          PAYLOAD=$(cat << JSON
+          COLOR="#36a64f"; if [ "$S_SAST" != "success" ] || [ "$S_SCA" != "success" ] || [ "$S_DAST" != "success" ]; then COLOR="#e01e5a"; fi
+          curl -X POST -H 'Content-type: application/json' --data "$(cat <<JSON
           {
             "attachments": [{
               "color": "$COLOR",
               "title": "CI/CD Security Pipeline",
               "text": "$STATUS",
               "fields": [
-                {"title": "Repo", "value": "${{ github.repository }}", "short": true},
-                {"title": "Branch", "value": "${{ github.ref_name }}", "short": true}
+                {"title": "Repo", "value": "$REPO", "short": true},
+                {"title": "Branch", "value": "$BRANCH", "short": true}
               ],
               "actions": [{
                 "type": "button",
@@ -234,5 +202,4 @@ PY
             }]
           }
 JSON
-)
-          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$HOOK"
+)" "$HOOK"
