@@ -195,23 +195,27 @@ jobs:
           allow_issue_writing: false
           artifact_name: 'zap-dast-report'
 
-      - name: Gate DAST (fail on High only via JSON)
+      - name: Gate DAST (fail on High via JSON)
         shell: bash
         run: |
-          if [ ! -f report_json.json ]; then
-            echo "Sem report_json.json; seguindo."; exit 0
+          set -euo pipefail
+          # garante jq disponível
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y && sudo apt-get install -y jq
           fi
-          if jq -e '.site[].alerts[] | select((.riskcode|tonumber) >= 3)' report_json.json >/dev/null; then
+
+          if [ ! -f report_json.json ]; then
+            echo "Sem report_json.json; seguindo."
+            exit 0
+          fi
+
+          if jq -e '.site[]? .alerts[]? | select((.riskcode|tonumber) >= 3)' report_json.json >/dev/null; then
             echo "ZAP encontrou High (riskcode>=3). Falhando job."
             exit 1
           else
             echo "Sem High no ZAP."
           fi
 
-
-            - name: Tear down
-              if: always()
-              run: docker compose down -v || true
 
 
   # ===================== Notificação (opcional) =====================
