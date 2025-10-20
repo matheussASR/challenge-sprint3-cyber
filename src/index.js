@@ -1,100 +1,132 @@
 // src/index.js (ou onde inicializa o Express)
 const express = require('express');
 const helmet = require('helmet');
-// Importar bibliotecas para validação e sanitização
-const { body, validationResult } = require('express-validator');
 const app = express();
-app.use(express.json()); // Habilita o parsing de JSON no corpo das requisições
 
-// [Seus middlewares de segurança (Helmet, etc.) aqui...]
+// Middleware para processar JSON (necessário para rotas POST)
+app.use(express.json()); 
 
 // 1) Remova banner do Express
 app.disable('x-powered-by');
 
 // 2) Cabeçalhos de segurança (Helmet)
 app.use(helmet({
-  contentSecurityPolicy: {
-    useDefaults: true,
-    directives: {
-      "default-src": ["'self'"]
-    }
-  },
-  referrerPolicy: { policy: "no-referrer" },
-  frameguard: { action: 'deny' },
+    contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+            "default-src": ["'self'"]
+        }
+    },
+    referrerPolicy: { policy: "no-referrer" },
+    frameguard: { action: 'deny' },
 }));
+
+
+// --- Funções de Validação e Sanitização Manuais ---
+
+/**
+ * Sanitiza e valida uma string para ser um nome seguro (apenas letras, sem scripts).
+ * @param {string} input - O nome a ser verificado.
+ * @returns {string|null} - O nome limpo ou null se for inválido.
+ */
+function sanitizeAndValidateName(input) {
+    if (!input || typeof input !== 'string') return null;
+
+    // Sanitização: Remove espaços em excesso e tags HTML (simples)
+    const sanitized = input.trim().replace(/<[^>]*>/g, '');
+    
+    // Validação (Whitelist): Permite apenas letras e espaços
+    // Regex: ^[A-Za-zÀ-ÿ\s]+$ (Permite letras, acentos e espaços)
+    if (!/^[A-Za-zÀ-ÿ\s]+$/.test(sanitized)) {
+        return null; // Falha na validação
+    }
+    
+    // Garantir que o nome tenha um tamanho mínimo decente
+    if (sanitized.length < 2) return null;
+    
+    return sanitized;
+}
+
+/**
+ * Validação básica de email.
+ * @param {string} input - O email a ser verificado.
+ * @returns {string|null} - O email sanitizado (minúsculas) ou null.
+ */
+function sanitizeAndValidateEmail(input) {
+    if (!input || typeof input !== 'string') return null;
+    
+    const email = input.trim().toLowerCase(); // Sanitização: Trim e Minúsculas
+
+    // Validação Regex simples de formato de e-mail
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return null; 
+    }
+    return email;
+}
+
 
 // --- Rotas de Login e Cadastro com SSDLC Aplicado ---
 
-// Função de Tratamento Seguro de Erros e Validação
-const handleValidationErrors = (req, res, next) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        // TRATAMENTO SEGURO DE ERROS: Retorna mensagem genérica para não vazar detalhes
-        return res.status(400).json({ 
-            success: false, 
-            message: 'Dados de entrada inválidos. Verifique os campos e tente novamente.' 
-        });
-    }
-    next();
-};
-
 // --- Rota de Cadastro ---
-app.post('/cadastro', [
-    // Validação de Entradas (Regras de Whitelist/Sanitização)
-    body('email')
-        .isEmail().withMessage('Email inválido.')
-        .normalizeEmail(), // Sanitiza: converte para minúsculas
-    body('senha')
-        .isLength({ min: 8 }).withMessage('A senha deve ter no mínimo 8 caracteres.'),
-    body('nome')
-        .trim() // Sanitiza: remove espaços em branco no início/fim
-        .isAlpha('pt-BR', { ignore: ' ' }).withMessage('Nome contém caracteres inválidos.'),
-
-    handleValidationErrors
-], async (req, res) => {
+app.post('/cadastro', async (req, res) => {
     const { email, senha, nome } = req.body;
 
-    // Prática de Segurança: A senha NUNCA é armazenada em texto puro.
-    // Use bcrypt/argon2 para hash e salt. (Simulação: const hashedPassword = await hash(senha);)
+    // 1. VALIDAÇÃO E SANITIZAÇÃO DE ENTRADAS (Manual)
+    const safeName = sanitizeAndValidateName(nome);
+    const safeEmail = sanitizeAndValidateEmail(email);
 
-    // Se passou na validação, os dados são considerados seguros.
-    console.log(`Novo usuário cadastrado: ${nome} (${email})`);
+    // Validação da Senha
+    if (!senha || senha.length < 8) {
+        // TRATAMENTO SEGURO DE ERROS (Genérico)
+        return res.status(400).json({ success: false, message: 'Dados de entrada inválidos.' });
+    }
+    
+    if (!safeName || !safeEmail) {
+        // TRATAMENTO SEGURO DE ERROS (Genérico)
+        return res.status(400).json({ success: false, message: 'Dados de entrada inválidos.' });
+    }
+
+    // Nota SSDLC: Em produção, a senha deve ser hasheada e salgada antes de salvar.
+    console.log(`Novo usuário cadastrado: ${safeName} (${safeEmail})`);
     
     // Tratamento Seguro de Erros: Simulação de resposta bem-sucedida
     res.status(201).json({ success: true, message: 'Cadastro realizado com sucesso.' });
 });
 
-// --- Rota de Login ---
-app.post('/login', [
-    // Validação de Entradas
-    body('email').isEmail().normalizeEmail(),
-    body('senha').exists(),
 
-    handleValidationErrors
-], async (req, res) => {
+// --- Rota de Login ---
+app.post('/login', async (req, res) => {
     const { email, senha } = req.body;
 
-    // Simulação de busca no DB e verificação de senha
-    if (email === 'teste@ssdls.com' && senha === 'SenhaSegura123') {
-        
-        // AUTENTICAÇÃO SEGURA COM TOKENS: Geração de Token (JWT)
-        const token = 'seu-jwt-seguro-aqui'; // Simulação de token
-        
-        // AUTENTICAÇÃO SEGURA COM EXPIRAÇÃO E COOKIES:
-        res.cookie('auth_token', token, {
-            httpOnly: true,
-            secure: true, // EXIGE HTTPS
-            sameSite: 'strict',
-            maxAge: 3600000 // Expiração de 1 hora
-        });
+    // 1. VALIDAÇÃO E SANITIZAÇÃO DE ENTRADAS (Manual)
+    const safeEmail = sanitizeAndValidateEmail(email);
 
-        // VERIFICAÇÃO DE SESSÃO: (Na vida real, o token seria verificado em cada requisição protegida)
-        return res.json({ success: true, message: 'Login bem-sucedido.', user: email });
+    if (!safeEmail || !senha) {
+        // TRATAMENTO SEGURO DE ERROS (Mensagem unificada)
+        return res.status(401).json({ success: false, message: 'Credenciais inválidas.' });
     }
 
-    // TRATAMENTO SEGURO DE ERROS: Mensagem genérica para prevenir ataque de enumeração de usuário
+    // Simulação de busca no DB e verificação de senha
+    if (safeEmail === 'teste@ssdls.com' && senha === 'SenhaSegura123') {
+        
+        // AUTENTICAÇÃO SEGURA COM TOKENS: Geração de Token (Simulação)
+        const token = 'seu-jwt-seguro-aqui'; 
+        
+        // 2. AUTENTICAÇÃO SEGURA COM EXPIRAÇÃO E COOKIES:
+        res.cookie('auth_token', token, {
+            httpOnly: true,     // Não acessível via JS (Mitiga XSS)
+            secure: true,       // EXIGE HTTPS
+            sameSite: 'strict', // Proteção contra CSRF
+            maxAge: 3600000     // Expiração de 1 hora
+        });
+
+        return res.json({ success: true, message: 'Login bem-sucedido.', user: safeEmail });
+    }
+
+    // 3. TRATAMENTO SEGURO DE ERROS: Mensagem genérica (evita enumeração de usuário)
     return res.status(401).json({ success: false, message: 'Credenciais inválidas.' });
 });
+
 
 // ... [Outras rotas e inicialização]
 app.get('/', (req, res) => res.send('OK'));
